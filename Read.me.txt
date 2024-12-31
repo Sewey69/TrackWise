@@ -4,13 +4,13 @@ TrackWise is a lightweight, Python-based application designed to help you track 
 
 ## Features
 
-- **Lightweight and Fast:** Minimal resource consumption, perfect for everyday use.
-- **Intuitive Interface:** Simple and user-friendly Tkinter-based GUI.
-- **Comprehensive Tracking:** Logs your app usage seamlessly.
-- **Data Visualization:** Generates insightful graphs and visualizations of your usage patterns.
-- **Data Export:** Export your usage data in CSV format for external analysis.
-- **Cross-Compatibility:** Ensured functionality across various PCs using `auto-py-to-exe`.
-
+- Lightweight and Fast: Minimal resource consumption, perfect for everyday use.
+- Intuitive Interface: Simple and user-friendly Tkinter-based GUI.
+- Comprehensive Tracking: Logs your app usage seamlessly.
+- Data Visualization: Generates insightful graphs and visualizations of your usage patterns.
+- Data Export: Export your usage data in CSV format for external analysis.
+- Safe Data: Your tracking data is only yours!
+- Background Service: The app works for you in the background.
 ---
 
 ## How It Works
@@ -25,10 +25,4 @@ TrackWise is a lightweight, Python-based application designed to help you track 
 
 3. **Visual Insights:**
    - Open the visualizations window to view graphs and charts summarizing your app usage. 
-   - If no data exists, the app gracefully displays a "No data" message.
-
-4. **Export Data:**
-   - Easily export your usage data to a CSV file for external use.
-
-5. **Cross-Platform Compatibility:**
-   - Use `auto-py-to-exe` to package the app, ensuring compatibility with other PCs without the need for Python installation.
+   - Choose to visualize your usage over specific time intervals, with various graph types, and for all apps, individual apps, or the top 5 most used apps.
