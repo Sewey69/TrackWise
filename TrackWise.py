@@ -1,18 +1,15 @@
+#maybe there is some redondances, but my eyes began to hurt so i didn't bother removing them
 import tkinter as tk
 from tkinter.ttk import Style
-import customtkinter
 import numpy as np
 from customtkinter import *
 import sqlite3
 import time
-import threading
 import pygetwindow as gw
-import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from tkinter import *
 from tkinter import messagebox
-from matplotlib import cm
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from datetime import datetime, date, timedelta
 from tkinter import ttk
@@ -20,13 +17,21 @@ import subprocess
 from PIL import Image, ImageTk
 import calendar
 import matplotlib.dates as mdates
+import re
+from collections import defaultdict
+import os
+import sys
+import socket
+import threading
+import winreg as reg
 
 #shwaya variablouet
 tracking_process = None
 tracking = False
 animate_job = None
 
-db_path = os.path.join(os.getcwd(), 'usage_tracker.db')
+#preparing database
+db_path = os.path.join(os.path.dirname(sys.executable), 'usage_tracker.db')
 subprocess.run(["attrib","+H","usage_tracker.db"],check=True)
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
@@ -42,7 +47,7 @@ cursor.execute('''
 conn.commit()
 print("Database and table created successfully.")
 
-# the original app.py
+# the main utility script 
 def run_script():
     global tracking_process, tracking
     if (tracking_process is None or tracking_process.poll() is not None) and tracking is False:
@@ -59,7 +64,6 @@ def run_script():
             except sqlite3.Error as e:
                 print(f"Database error: {e}")
             finally:
-                # close the connection
                 local_conn.close()
 
         def track_usage():
@@ -117,7 +121,7 @@ def stop_script():
         update_status("Tracking stopped.")
 
         output_path = os.path.join(os.getcwd(), 'usage_data.csv')
-        subprocess.run(["attrib", "+H", "usage_data.csv"], check=True)
+        subprocess.run(["attrib","+H" , "usage_data.csv"], check=True)
         cone = sqlite3.connect(os.path.join(os.getcwd(), 'usage_tracker.db'))
         try:
             cone = sqlite3.connect(os.path.join(os.getcwd(), 'usage_tracker.db'))
@@ -159,7 +163,7 @@ def stop_animation():
 def save_and_exit():
     root.quit()
 
-# mena koll chay tebe3 l UI
+# the show_graphs interface
 def show_graph_window():
     if os.path.exists('usage_data.csv'):
         graph_window = Toplevel()
@@ -174,7 +178,47 @@ def show_graph_window():
         app_label = Label(graph_window, text="Select App", font=('Segoe UI', 14))
         app_label.grid(row=0, column=0, padx=(120,0), pady=(15,0), sticky=W)
 
-        df = pd.read_csv('usage_data.csv')
+        def extract_substrings(name):
+            name = re.sub(r'[^a-zA-Z0-9/\-_\s.]', '', name.lower())
+            name = re.sub(r'^[^a-zA-Z]+', '', name)
+            substrings = set()
+            for i in range(len(name)):
+                for j in range(i + 6, len(name) + 1):
+                    substrings.add(name[i:j])
+            return substrings
+
+        def find_best_match(name1, name2):
+            substrings1 = extract_substrings(name1)
+            substrings2 = extract_substrings(name2)
+            common = substrings1.intersection(substrings2)
+            if common:
+                return max(common, key=len)
+            return None
+
+        df = pd.read_csv("usage_data.csv")
+
+        names = df['app_name'].tolist()
+        grouped_names = defaultdict(list)
+
+        for i, name1 in enumerate(names):
+            for j, name2 in enumerate(names):
+                if i != j:
+                    best_match = find_best_match(name1, name2)
+                    if best_match:
+                        grouped_names[best_match].append(i)
+                        grouped_names[best_match].append(j)
+
+        for common, indices in grouped_names.items():
+            indices = set(indices)
+            for index in indices:
+                df.at[index, 'app_name'] = common
+
+        df['app_name'] = df['app_name'].apply(lambda x: re.sub(r'^[^a-zA-Z]+', '', x).capitalize())
+
+        df.to_csv("updated_usage_data.csv", index=False)
+
+        print(df)
+
         app_options = list(df['app_name'].unique()) + ["All Apps", "Top 5"]
         app_dropdown = ttk.Combobox(graph_window, values=app_options, font=('Segoe UI', 10))
         app_dropdown.set("All Apps")
@@ -240,6 +284,8 @@ def show_graph_window():
         graph_window.grid_columnconfigure(1, weight=1)
     else:
         messagebox.showerror("Error", "No data available. Please track first.\n If tracking is running, stop it and try again.")
+
+#create the graphs based on the choices of the user
 def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
     for widget in graph_frame.winfo_children():
         widget.destroy()
@@ -247,13 +293,11 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
     if selected_app != "All Apps" and selected_app != "Top 5":
-
+        df_others = df[df['app_name'] != selected_app]
         df_app = df[df['app_name'] == selected_app]
         if time_span == "Day":
             today = datetime.now()
             df_app = df_app[df_app['date'].dt.date == today.date()]
-            # df_app = df[(df['app_name'] == selected_app) & (df['date'].dt.date == today)].copy()
-
 
             if not df_app.empty:
                 if graph_type == "Bar Chart":
@@ -261,7 +305,6 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
                     plot_bar_chart_single(df_app, selected_app, graph_frame)
 
                 elif graph_type == "Pie Chart":
-                    # Calculate data for pie chart
                     total_usage_time = df_app['usage_time'].sum()
                     others_usage_time = df['usage_time'].sum() - total_usage_time
                     pie_data = pd.DataFrame({
@@ -281,7 +324,7 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
             df_app = df[df['date'].dt.month == current_month]
             total_usage_time = df_app['usage_time'].sum()
 
-            others_usage_time = df['usage_time'].sum() - total_usage_time
+            others_usage_time = df_others["usage_time"].sum()
 
             pie_data = pd.DataFrame({
                 'app_name': [selected_app, 'Others'],
@@ -289,7 +332,6 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
             })
 
             if graph_type == "Bar Chart":
-                print(df_app.head())
                 plot_bar_chart_current_month(df_app, selected_app, graph_frame)
             elif graph_type == "Pie Chart":
                 plot_pie_chart(pie_data, graph_frame)
@@ -348,7 +390,7 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
             if graph_type.lower() == "pie chart":
                 plot_pie_chart(df_top5, graph_frame)
             else:
-                plot_bar_chart(df_top5, graph_frame)
+                plot_bar_chart(df_top5, graph_frame, " in " + str(current_date))
 
         else:
             top_apps = df.groupby('app_name')['usage_time'].sum().nlargest(5).reset_index()
@@ -391,20 +433,29 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
         if graph_type.lower() == "pie chart":
             plot_pie_chart(filtered_data, graph_frame)
         else:
-            plot_bar_chart(filtered_data, graph_frame)
+            plot_bar_chart(filtered_data, graph_frame,)
 
 def plot_pie_chart(df, graph_frame, message = "App Usage Percentage"):
     figure, ax = plt.subplots(figsize=(10, 7))
 
-    df['app_name'] = df['app_name'].apply(lambda x: x[:15] + '...' if len(x) > 15 else x)
+    df['app_name'] = df['app_name'].apply(lambda x: x[:20] + '...' if len(x) > 15 else x)
 
-    ax.pie(df['usage_time'], labels=df['app_name'], autopct='%1.1f%%', startangle=90)
-    ax.set_title(message, fontsize=14)
+    colors = [
+        "#3498db", "#5dade2", "#85c1e9", "#aed6f1",
+        "#2e86c1", "#2874a6", "#21618c", "#1b4f72",
+        "#73c6b6", "#5499c7"
+    ]
+
+    def autopct_more_than_10(pct):
+        return f'{pct:.1f}%' if pct > 10 else ''
+
+    ax.pie(df['usage_time'], labels=df['app_name'], autopct=autopct_more_than_10, startangle=90, textprops={'fontsize': 10, 'font' : 'Segoe UI'}, colors=colors)
+    ax.set_title(message, fontsize=17, fontdict={'fontsize': 14, 'font' : 'Segoe UI'})
 
     canvas = FigureCanvasTkAgg(figure, master=graph_frame)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky=N+S+E+W)
-def plot_bar_chart(df, graph_frame):
+def plot_bar_chart(df, graph_frame, message=""):
     figure, ax = plt.subplots(figsize=(10, 7))
 
     df['app_name'] = df['app_name'].apply(lambda x: x[:15] + '...' if len(x) > 15 else x)
@@ -415,7 +466,7 @@ def plot_bar_chart(df, graph_frame):
 
     ax.bar(df['app_name'], df['usage_time'], color=colors)
 
-    ax.set_ylabel('Usage Time (seconds)', fontsize=12)
+    ax.set_ylabel('Usage Time (seconds)' + message, fontsize=12)
     ax.set_title('Apps Usage Time', fontsize=14)
 
     ax.tick_params(axis='x', labelsize=10)
@@ -470,7 +521,6 @@ def plot_bar_chart_current_month(df, selected_app, graph_frame):
     today = date.today()
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
-    # Filter for the selected app and current month
     current_month_start = today.replace(day=1)
     _, days_in_month = calendar.monthrange(today.year, today.month)
     current_month_end = today.replace(day=days_in_month)
@@ -486,7 +536,6 @@ def plot_bar_chart_current_month(df, selected_app, graph_frame):
         Label(graph_frame, text="No data available for the selected app this month.", fg="red").grid(row=0, column=0)
         return
 
-    # Calculate daily usage for the month
     df_app['day'] = df_app['date'].dt.day
     daily_usage = df_app.groupby('day')['usage_time'].sum().reset_index()
     print(daily_usage.head())
@@ -503,7 +552,6 @@ def plot_bar_chart_current_month(df, selected_app, graph_frame):
 
     colors = plt.cm.Blues(np.linspace(0.3, 1, len(df)))
 
-    # Create the bar chart
     figure, ax = plt.subplots(figsize=(10, 7))
     ax.bar(daily_usage['day'], daily_usage['usage_time'], color=colors)
     ax.set_title(f'Daily Usage of {selected_app} for {today.strftime("%B %Y")}', fontsize=14)
@@ -512,7 +560,6 @@ def plot_bar_chart_current_month(df, selected_app, graph_frame):
     ax.set_xticklabels(range(1, days_in_month + 1))
     ax.grid(axis='y', linestyle='--', alpha=0.7)
 
-    # Display the chart in the tkinter frame
     canvas = FigureCanvasTkAgg(figure, master=graph_frame)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
@@ -523,15 +570,13 @@ def plot_bar_chart_last_40_days(df, selected_app, graph_frame):
     df_app = df[(df['app_name'] == selected_app) &
                 (df['date'].dt.date >= start_date) &
                 (df['date'].dt.date <= today)].copy()
-    print("hethi df app")
-    print(df_app)
+
     if df_app.empty:
         for widget in graph_frame.winfo_children():
             widget.destroy()
         Label(graph_frame, text="No data available for the selected app in the last 40 days.", fg="red").grid(row=0, column=0)
         return
 
-    # Calculate daily usage for the last 40 days
     df_app['day'] = df_app['date'].dt.date
     daily_usage = df_app.groupby('day')['usage_time'].sum().reset_index()
     daily_usage['day'] = pd.to_datetime(daily_usage['day'], errors='coerce')
@@ -542,27 +587,26 @@ def plot_bar_chart_last_40_days(df, selected_app, graph_frame):
         Label(graph_frame, text="No daily data available for the selected app in the last 40 days.", fg="red").grid(row=0, column=0)
         return
 
-    # Clear previous widgets
+    earliest_date = max(daily_usage['day'].min().date(), today - timedelta(days=20))
+    filtered_start_date = min(earliest_date, start_date)
+    filtered_date_range = pd.date_range(start=filtered_start_date, end=today)
+
+    all_dates_df = pd.DataFrame({'day': filtered_date_range})
+    daily_usage = pd.merge(all_dates_df, daily_usage, on='day', how='left').fillna(0)
+
     for widget in graph_frame.winfo_children():
         widget.destroy()
     plt.close('all')
 
-    print("hethi daily")
-    print(daily_usage.head())
-    print(daily_usage['day'].dtype)
-    print(daily_usage['usage_time'].dtype)
+    colors = plt.cm.Blues(np.linspace(0.3, 1, len(filtered_date_range)))
 
-    colors = plt.cm.Blues(np.linspace(0.3, 1, len(df)))
-
-    # Create the bar chart
     figure, ax = plt.subplots(figsize=(10, 7))
     ax.bar(daily_usage['day'], daily_usage['usage_time'], color=colors)
-    ax.set_title(f'Daily Usage of {selected_app} in the Last 40 Days', fontsize=14)
+    ax.set_title(f'Daily Usage of {selected_app} (Last {len(filtered_date_range)} Days)', fontsize=14)
     ax.set_ylabel('Usage Time (seconds)', fontsize=12)
 
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=4))
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=6))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-
 
     plt.tight_layout()
     ax.grid(axis='y', linestyle='--', alpha=0.7)
@@ -574,9 +618,67 @@ def plot_bar_chart_last_40_days(df, selected_app, graph_frame):
 # mena l main CTk
 root = CTk()
 root.title("TrackWise")
-root.geometry("330x460")
+root.geometry("330x530")
 set_appearance_mode("dark")
 root.resizable(False, False)
+
+# start tracking on launch
+if "--autostart" in sys.argv:
+    print("Autostart functionality triggered.")
+    run_script()
+
+# make only one instance of the app possible in the same moment
+HOST = 'localhost'
+PORT = 65432
+
+def restore_window():
+    """Restore the application window."""
+    root.deiconify()
+def handle_incoming_connections():
+    """Handle incoming connections from subsequent instances."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((HOST, PORT))
+        server.listen()
+        print("Listening for incoming connections...")
+        while True:
+            conn, addr = server.accept()
+            with conn:
+                print(f"Connection from {addr}")
+                restore_window()
+def is_instance_running():
+    """Check if another instance of the application is already running."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+            client.connect((HOST, PORT))
+            client.sendall(b"Restore")  # Send a restore command
+        return True
+    except ConnectionRefusedError:
+        return False
+if is_instance_running():
+    print("Application is already running. Opening...")
+    sys.exit(0)
+
+server_thread = threading.Thread(target=handle_incoming_connections, daemon=True)
+server_thread.start()
+
+#add to startup apps (only for windows)
+def add_to_startup(app_name):
+    try:
+        if getattr(sys, 'frozen', False):
+            exe_path = sys.executable
+        else:
+            exe_path = os.path.abspath(__file__)
+        key = reg.OpenKey(reg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, reg.KEY_SET_VALUE)
+
+        reg.SetValueEx(key, app_name, 0, reg.REG_SZ, exe_path)
+        reg.CloseKey(key)
+        print(f"{app_name} added to startup successfully!")
+    except Exception as e:
+        print(f"Failed to add to startup: {e}")
+app_name = "TrackWise"
+add_to_startup(app_name)
+
 
 # hetha mta3 l icons
 if getattr(sys, 'frozen', False):
@@ -585,18 +687,37 @@ else:
     icon_path = os.path.join(os.path.dirname(__file__), 'clock.ico')
 if os.path.exists(icon_path):
     root.iconbitmap(icon_path)
-tracking_image = CTkImage(Image.open("play.png"))
-stop_tracking_image = CTkImage(Image.open("stop.png"), size=(15, 15))
-graphs_frame = CTkImage(Image.open("graphs.png"), size=(15, 15))
+
+def get_resource_path(relative_path):
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+play_image_path = get_resource_path('images/play.png')
+stop_image_path = get_resource_path('images/stop.png')
+graphs_image_path = get_resource_path('images/graphs.png')
+
+try:
+    tracking_image = CTkImage(Image.open(play_image_path))
+    stop_tracking_image = CTkImage(Image.open(stop_image_path), size=(15, 15))
+    graphs_frame = CTkImage(Image.open(graphs_image_path), size=(15, 15))
+except FileNotFoundError as e:
+    print(f"Image file not found: {e}")
 
 frame = tk.Frame(root, padx=10, pady=10)
 frame.pack(padx=(0,10), pady=10)
 
-#lfles
+#buttons
 tracking_label1 = CTkLabel(root, text="TrackWise", font=('Segoe UI', 28, 'bold'), bg_color="transparent")
-tracking_label2 = CTkLabel(root, text="Your App Usage, Documented", font=('Segoe UI', 17), bg_color="transparent")
+tracking_label2 = CTkLabel(root, text="Your Screen Usage, Documented", font=('Segoe UI', 17), bg_color="transparent")
 tracking_label1.pack(pady=(6,0))
 tracking_label2.pack(pady=(5,20))
+
+def on_close():
+    root.withdraw()
+root.protocol("WM_DELETE_WINDOW", on_close)
 
 run_button = CTkButton(master=root,
                        height=40,
@@ -643,6 +764,21 @@ graph_button.pack(pady=10, padx=10)
 status_label = CTkLabel(root, text="Status will appear here.", height=12, font=('Segoe UI', 14))
 status_label.pack(pady=18, fill='x')
 
+hide_button = CTkButton(
+    master=root,
+    text="Hide",
+    command=on_close,
+    height=40,
+    width=160,
+    border_width=2,
+    font=('Segoe UI', 14),
+    border_color="#3498db",
+    hover_color="#3498db",
+    fg_color="transparent",
+    corner_radius=26
+)
+hide_button.pack(pady=10)
+
 save_exit_button = CTkButton(
     master=root,
     height=40,
@@ -658,7 +794,8 @@ save_exit_button = CTkButton(
 )
 save_exit_button.pack(pady=10, padx=10)
 
-credit = CTkLabel(root, text="2024©", font=('Segoe UI', 10), bg_color="transparent")
+
+credit = CTkLabel(root, text="2024©GoldenDragon", font=('Segoe UI', 10), bg_color="transparent")
 credit.pack(pady=(10,0))
 
 root.mainloop()
