@@ -30,3 +30,11 @@ TrackWise is a lightweight, Python-based application designed to help you track 
   
  You can download the app setup from this link:
 https://www.mediafire.com/file/sblugeqqniymuw2/TrackWise_2.0.exe/file
+---
+
+ Screen Shots:
+ 
+![main app screen shot](./Screen%20Shots/main%20app%20screen%20shot.png)
+![main app screen shot](./Screen%20Shots/graphs%201.png)
+![main app screen shot](./Screen%20Shots/graphs%202.png)
+![main app screen shot](./Screen%20Shots/graphs%203.png)
