@@ -28,8 +28,8 @@ TrackWise is a lightweight, Python-based application designed to help you track 
    - Choose to visualize your usage over specific time intervals, with various graph types, and for all apps, individual apps, or the top 5 most used apps.
   
   
- You can download the app setup from this link:
-https://www.mediafire.com/file/sblugeqqniymuw2/TrackWise_2.0.exe/file
+ You can download the app setup from this link
+https://www.mediafire.com/file/hxo7u2xvdzpdp7g/TrackWise_3.0.exe/file
 ---
 
  Screen Shots:
