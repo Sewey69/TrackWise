@@ -29,7 +29,7 @@ TrackWise is a lightweight, Python-based application designed to help you track 
   
   
  You can download the app setup from this link
-https://www.mediafire.com/file/hxo7u2xvdzpdp7g/TrackWise_3.0.exe/file
+https://drive.google.com/file/d/17XSJ0x2wt28N8KUYrHxYQ9ki1dFk6x-t/view?usp=sharing
 ---
 
  Screen Shots:
