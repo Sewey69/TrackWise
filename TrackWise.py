@@ -1,4 +1,3 @@
-#maybe there is some redondances, but my eyes began to hurt so i didn't bother removing them
 import tkinter as tk
 from tkinter.ttk import Style
 import numpy as np
@@ -24,30 +23,15 @@ import sys
 import socket
 import threading
 import winreg as reg
+import ctypes
+from functools import lru_cache
+import re
 
 #shwaya variablouet
 tracking_process = None
 tracking = False
 animate_job = None
 
-#preparing database
-db_path = os.path.join(os.path.dirname(sys.executable), 'usage_tracker.db')
-subprocess.run(["attrib","+H","usage_tracker.db"],check=True)
-conn = sqlite3.connect(db_path)
-cursor = conn.cursor()
-
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS usage (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        app_name TEXT NOT NULL,
-        usage_time INTEGER NOT NULL,
-        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-''')
-conn.commit()
-print("Database and table created successfully.")
-
-# the main utility script 
 def run_script():
     global tracking_process, tracking
     if (tracking_process is None or tracking_process.poll() is not None) and tracking is False:
@@ -120,22 +104,19 @@ def stop_script():
         print("Tracking stopped.")
         update_status("Tracking stopped.")
 
-        output_path = os.path.join(os.getcwd(), 'usage_data.csv')
-        subprocess.run(["attrib","+H" , "usage_data.csv"], check=True)
-        cone = sqlite3.connect(os.path.join(os.getcwd(), 'usage_tracker.db'))
+        
         try:
-            cone = sqlite3.connect(os.path.join(os.getcwd(), 'usage_tracker.db'))
-            df = pd.read_sql_query("SELECT * FROM usage", conn)
-            if not df.empty:
-                df.to_csv(output_path, index=False)
-                subprocess.run(["attrib", "+H", output_path], check=True)
-                print(f"CSV successfully created at: {output_path}")
+            cursor.execute("SELECT * FROM usage")
+            rows = cursor.fetchall()
+            if rows:
+                df = pd.DataFrame(rows, columns=[col[0] for col in cursor.description])
+                df.to_csv(csv_path, index=False)
+                print(f"Data exported to CSV at {db_dir}")
+                update_status("Tracking stopped and data exported.")
             else:
                 print("No data to export.")
         except Exception as e:
             print(f"Error exporting data: {e}")
-        finally:
-            cone.close()
 
         update_status("Tracking stopped and data exported.")
     else:
@@ -163,7 +144,7 @@ def stop_animation():
 def save_and_exit():
     root.quit()
 
-# the show_graphs interface
+# mena koll chay tebe3 l UI
 def show_graph_window():
     if os.path.exists('usage_data.csv'):
         graph_window = Toplevel()
@@ -186,42 +167,60 @@ def show_graph_window():
                 for j in range(i + 6, len(name) + 1):
                     substrings.add(name[i:j])
             return substrings
-
-        def find_best_match(name1, name2):
+        def find_best_match(name1, names):
             substrings1 = extract_substrings(name1)
-            substrings2 = extract_substrings(name2)
-            common = substrings1.intersection(substrings2)
-            if common:
-                return max(common, key=len)
-            return None
+            best_match = None
+            max_score = 0
+            for name2 in names:
+                substrings2 = extract_substrings(name2)
+                common = substrings1.intersection(substrings2)
+                score = len(common)  
+                if score > max_score:
+                    max_score = score
+                    best_match = name2
+            return best_match if max_score > 0 else None
 
         df = pd.read_csv("usage_data.csv")
 
         names = df['app_name'].tolist()
         grouped_names = defaultdict(list)
+        unique_names = set(names)
+        name_map = {}
 
-        for i, name1 in enumerate(names):
-            for j, name2 in enumerate(names):
-                if i != j:
-                    best_match = find_best_match(name1, name2)
-                    if best_match:
-                        grouped_names[best_match].append(i)
-                        grouped_names[best_match].append(j)
+        for name in unique_names:
+            best_match = find_best_match(name, unique_names - {name})
+            if best_match:
+                name_map[name] = best_match
 
-        for common, indices in grouped_names.items():
-            indices = set(indices)
-            for index in indices:
-                df.at[index, 'app_name'] = common
+        df['app_name'] = df['app_name'].map(name_map).fillna(df['app_name'])
 
         df['app_name'] = df['app_name'].apply(lambda x: re.sub(r'^[^a-zA-Z]+', '', x).capitalize())
 
-        df.to_csv("updated_usage_data.csv", index=False)
+        try:
+            conn1 = sqlite3.connect(db_path)
+            cursor = conn1.cursor()
 
-        print(df)
+            existing_df = pd.read_sql_query("SELECT * FROM usage", conn1)
 
-        app_options = list(df['app_name'].unique()) + ["All Apps", "Top 5"]
+            changed_rows = df[df['app_name'] != existing_df['app_name']]
+
+            for index, row in changed_rows.iterrows():
+                cursor.execute('''
+                    UPDATE usage
+                    SET app_name = ?, usage_time = ?, date = ?
+                    WHERE id = ?
+                ''', (row['app_name'], row['usage_time'], row['date'], row['id']))
+
+            conn1.commit()
+            print("Database updated with only changed records.")
+        except sqlite3.OperationalError as e:
+            print(f"Error updating the database: {e}")
+        finally:
+            conn1.close()
+
+        app_options = list(df['app_name'].unique()) + ["Top 10", "Top 5"]
         app_dropdown = ttk.Combobox(graph_window, values=app_options, font=('Segoe UI', 10))
-        app_dropdown.set("All Apps")
+        app_dropdown.set("Top 10")
         app_dropdown.grid(row=0, column=1, padx=10, pady=(15,0))
 
         time_label = Label(graph_window, text="Select Time Span", font=('Segoe UI', 14))
@@ -282,17 +281,17 @@ def show_graph_window():
 
         graph_window.grid_rowconfigure(3, weight=1)
         graph_window.grid_columnconfigure(1, weight=1)
+
     else:
         messagebox.showerror("Error", "No data available. Please track first.\n If tracking is running, stop it and try again.")
-
-#create the graphs based on the choices of the user
 def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
     for widget in graph_frame.winfo_children():
         widget.destroy()
 
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
-    if selected_app != "All Apps" and selected_app != "Top 5":
+    # Single app
+    if selected_app != "Top 10" and selected_app != "Top 5":
         df_others = df[df['app_name'] != selected_app]
         df_app = df[df['app_name'] == selected_app]
         if time_span == "Day":
@@ -355,6 +354,7 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
                       fg="red").grid(
                     row=0, column=0, columnspan=3, sticky="nsew", padx=20, pady=10)
 
+    # TOP 5
     elif selected_app == "Top 5":
         if time_span == "Month":
             current_month = datetime.now().month
@@ -406,34 +406,57 @@ def generate_graph(df, selected_app, time_span, graph_type, graph_frame):
             else:
                 plot_bar_chart(top_apps, graph_frame)
 
-    # ALL APPS
+    # TOP 10
     else:
         if time_span == "Month":
             current_month = datetime.now().month
-            filtered_data = df[df['date'].dt.month == current_month].groupby('app_name')[
-                'usage_time'].sum().reset_index()
+            df_this_month = df[df['date'].dt.month == current_month]
+            df_top10 = df_this_month.groupby('app_name')['usage_time'].sum().nlargest(10).reset_index()
+
+            if df_top10.empty:
+                for widget in graph_frame.winfo_children():
+                    widget.destroy()
+                Label(graph_frame, text=f"No data available for the selected {time_span.lower()} period.",
+                      fg="red").grid(
+                    row=0, column=0, columnspan=3, sticky="nsew", padx=20, pady=10)
+                return
+
+            if graph_type.lower() == "pie chart":
+                plot_pie_chart(df_top10, graph_frame)
+            else:
+                plot_bar_chart(df_top10, graph_frame, "", 45)
+
         elif time_span == "Day":
             current_date = datetime.now().date()
-            filtered_data = df[df['date'].dt.date == current_date].groupby('app_name')['usage_time'].sum().reset_index()
-        else:
-            filtered_data = df.groupby('app_name')['usage_time'].sum().reset_index()
+            df_today = df[df['date'].dt.date == current_date]
+            df_top10 = df_today.groupby('app_name')['usage_time'].sum().nlargest(10).reset_index()
 
-        if filtered_data.empty:
-            for widget in graph_frame.winfo_children():
-                widget.destroy()
-            Label(graph_frame, text=f"No data available for the selected {time_span.lower()} period.", fg="red").grid(
-                row=0, column=0, columnspan=3, sticky="nsew", padx=20, pady=10)
-            return
+            if df_top10.empty:
+                for widget in graph_frame.winfo_children():
+                    widget.destroy()
+                Label(graph_frame, text=f"No data available for the selected {time_span.lower()} period.",
+                      fg="red").grid(
+                    row=0, column=0, columnspan=3, sticky="nsew", padx=20, pady=10)
+                return
 
-        if graph_type.lower() == "pie chart":
-            plot_pie_chart(filtered_data, graph_frame)
-        else:
-            plot_bar_chart(filtered_data, graph_frame)
+            if graph_type.lower() == "pie chart":
+                plot_pie_chart(df_top10, graph_frame)
+            else:
+                plot_bar_chart(df_top10, graph_frame, " in " + str(current_date),  45)
 
-        if graph_type.lower() == "pie chart":
-            plot_pie_chart(filtered_data, graph_frame)
         else:
-            plot_bar_chart(filtered_data, graph_frame,)
+            df_top10 = df.groupby('app_name')['usage_time'].sum().nlargest(10).reset_index()
+
+            if df_top10.empty:
+                for widget in graph_frame.winfo_children():
+                    widget.destroy()
+                Label(graph_frame, text="No data available for all time.", fg="red").grid(row=0, column=0)
+                return
+
+            if graph_type.lower() == "pie chart":
+                plot_pie_chart(df_top10, graph_frame)
+            else:
+                plot_bar_chart(df_top10, graph_frame, "", 45)
 
 def plot_pie_chart(df, graph_frame, message = "App Usage Percentage"):
     figure, ax = plt.subplots(figsize=(10, 7))
@@ -455,7 +478,7 @@ def plot_pie_chart(df, graph_frame, message = "App Usage Percentage"):
     canvas = FigureCanvasTkAgg(figure, master=graph_frame)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky=N+S+E+W)
-def plot_bar_chart(df, graph_frame, message=""):
+def plot_bar_chart(df, graph_frame, message="" , ang = 0):
     figure, ax = plt.subplots(figsize=(10, 7))
 
     df['app_name'] = df['app_name'].apply(lambda x: x[:15] + '...' if len(x) > 15 else x)
@@ -470,6 +493,7 @@ def plot_bar_chart(df, graph_frame, message=""):
     ax.set_title('Apps Usage Time', fontsize=14)
 
     ax.tick_params(axis='x', labelsize=10)
+    ax.set_xticklabels(df['app_name'], rotation=ang, ha='right', fontsize=10)
     plt.tight_layout()
     ax.grid(axis='y', linestyle='None', alpha=0.7)
 
@@ -622,20 +646,11 @@ root.geometry("330x530")
 set_appearance_mode("dark")
 root.resizable(False, False)
 
-# start tracking on launch
-if "--autostart" in sys.argv:
-    print("Autostart functionality triggered.")
-    run_script()
-
-# make only one instance of the app possible in the same moment
 HOST = 'localhost'
 PORT = 65432
-
 def restore_window():
-    """Restore the application window."""
     root.deiconify()
 def handle_incoming_connections():
-    """Handle incoming connections from subsequent instances."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, PORT))
@@ -647,22 +662,18 @@ def handle_incoming_connections():
                 print(f"Connection from {addr}")
                 restore_window()
 def is_instance_running():
-    """Check if another instance of the application is already running."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
             client.connect((HOST, PORT))
-            client.sendall(b"Restore")  # Send a restore command
+            client.sendall(b"Restore")
         return True
     except ConnectionRefusedError:
         return False
-if is_instance_running():
-    print("Application is already running. Opening...")
-    sys.exit(0)
-
-server_thread = threading.Thread(target=handle_incoming_connections, daemon=True)
-server_thread.start()
-
-#add to startup apps (only for windows)
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
 def add_to_startup(app_name):
     try:
         if getattr(sys, 'frozen', False):
@@ -676,24 +687,96 @@ def add_to_startup(app_name):
         print(f"{app_name} added to startup successfully!")
     except Exception as e:
         print(f"Failed to add to startup: {e}")
-app_name = "TrackWise"
-add_to_startup(app_name)
+def export_db_to_csv():
+    try:
+        if os.path.exists(db_path):
+            with sqlite3.connect(db_path) as export_conn:
+                df = pd.read_sql_query("SELECT * FROM usage", export_conn)
+                if not df.empty:
+                    df.to_csv(csv_path, index=False)
+                    print(f"CSV successfully updated at: {csv_path}")
+                else:
+                    print("Database exists but contains no data.")
+        else:
+            print("Database does not exist. No CSV file created.")
+    except PermissionError as e:
+        print(f"Permission error: {e}")
+        messagebox.showerror("Permission Denied",
+                             "Please try downloading the app to a non-administrative folder.")
 
-
-# hetha mta3 l icons
-if getattr(sys, 'frozen', False):
-    icon_path = os.path.join(sys._MEIPASS, 'clock.ico')
-else:
-    icon_path = os.path.join(os.path.dirname(__file__), 'clock.ico')
-if os.path.exists(icon_path):
-    root.iconbitmap(icon_path)
-
+    except Exception as e:
+        print(f"Error exporting data: {e}")
 def get_resource_path(relative_path):
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
     else:
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
+def on_close():
+    root.withdraw()
+
+if not is_admin():
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, " ".join(sys.argv), None, 1
+    )
+    sys.exit(0)
+
+if is_instance_running():
+    print("Application is already running. Skipping csv export so we dont get a permission denied error")
+    sys.exit(0)
+
+if getattr(sys, 'frozen', False):
+    db_dir = os.path.dirname(sys.executable)
+else:
+    db_dir = os.path.dirname(os.path.abspath(__file__))
+
+db_path = os.path.join(db_dir, 'usage_tracker.db')
+csv_path = os.path.join(db_dir, 'usage_data.csv')
+
+if not os.path.exists(db_path):
+    with open(db_path, 'w') as db_file:
+        pass
+
+try:
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_name TEXT NOT NULL,
+            usage_time INTEGER NOT NULL,
+            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    print("Database and table created successfully.")
+
+    cursor.execute("SELECT * FROM usage")
+    rows = cursor.fetchall()  # Fetch all data rows
+    if rows:
+        df = pd.DataFrame(rows, columns=[col[0] for col in cursor.description])
+        df.to_csv(csv_path, index=False)
+        print(f"Data exported to CSV at {db_dir}")
+    else:
+        print("No data to export.")
+except sqlite3.OperationalError as e:
+    print(f"Error connecting to the database: {e}")
+    sys.exit(1)
+
+export_db_to_csv()
+
+server_thread = threading.Thread(target=handle_incoming_connections, daemon=True)
+server_thread.start()
+
+# hetha mta3 l icons
+if getattr(sys, 'frozen', False):
+    icon_path = os.path.join(sys._MEIPASS, 'clock1.ico')
+else:
+    icon_path = os.path.join(os.path.dirname(__file__), 'clock1.ico')
+if os.path.exists(icon_path):
+    root.iconbitmap(icon_path)
+
 
 play_image_path = get_resource_path('images/play.png')
 stop_image_path = get_resource_path('images/stop.png')
@@ -709,14 +792,12 @@ except FileNotFoundError as e:
 frame = tk.Frame(root, padx=10, pady=10)
 frame.pack(padx=(0,10), pady=10)
 
-#buttons
+#lfles
 tracking_label1 = CTkLabel(root, text="TrackWise", font=('Segoe UI', 28, 'bold'), bg_color="transparent")
 tracking_label2 = CTkLabel(root, text="Your Screen Usage, Documented", font=('Segoe UI', 17), bg_color="transparent")
 tracking_label1.pack(pady=(6,0))
 tracking_label2.pack(pady=(5,20))
 
-def on_close():
-    root.withdraw()
 root.protocol("WM_DELETE_WINDOW", on_close)
 
 run_button = CTkButton(master=root,
@@ -797,5 +878,8 @@ save_exit_button.pack(pady=10, padx=10)
 
 credit = CTkLabel(root, text="2024©GoldenDragon", font=('Segoe UI', 10), bg_color="transparent")
 credit.pack(pady=(10,0))
+
+app_name = "TrackWise"
+add_to_startup(app_name)
 
 root.mainloop()
