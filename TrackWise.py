@@ -104,8 +104,13 @@ def stop_script():
         print("Tracking stopped.")
         update_status("Tracking stopped.")
 
-        
+        # output_path = os.path.join(db_dir, 'usage_data.csv')
         try:
+            # with sqlite3.connect(db_path) as export_conn:
+            #     df = pd.read_sql_query("SELECT * FROM usage", export_conn)
+            #     if not df.empty:
+            #         df.to_csv(output_path, index=False)
+            #         print(f"CSV successfully created at: {output_path}")
             cursor.execute("SELECT * FROM usage")
             rows = cursor.fetchall()
             if rows:
@@ -174,7 +179,7 @@ def show_graph_window():
             for name2 in names:
                 substrings2 = extract_substrings(name2)
                 common = substrings1.intersection(substrings2)
-                score = len(common)  
+                score = len(common)  # You can adjust this score calculation if needed
                 if score > max_score:
                     max_score = score
                     best_match = name2
@@ -202,8 +207,10 @@ def show_graph_window():
 
             existing_df = pd.read_sql_query("SELECT * FROM usage", conn1)
 
+            # Identify changed rows (e.g., comparing app_name)
             changed_rows = df[df['app_name'] != existing_df['app_name']]
 
+            # Update only changed rows in the database
             for index, row in changed_rows.iterrows():
                 cursor.execute('''
                     UPDATE usage
@@ -879,7 +886,7 @@ save_exit_button.pack(pady=10, padx=10)
 credit = CTkLabel(root, text="2024©GoldenDragon", font=('Segoe UI', 10), bg_color="transparent")
 credit.pack(pady=(10,0))
 
+root.mainloop()
+
 app_name = "TrackWise"
 add_to_startup(app_name)
-
-root.mainloop()
